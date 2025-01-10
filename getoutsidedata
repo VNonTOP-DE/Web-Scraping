@@ -1,0 +1,38 @@
+Code that i scawl data by scrapy using spider
+The result of the code is the file 'animedata.json'
+-------------------------------------------------------------------------------------
+
+import scrapy
+
+class AnimeSpider(scrapy.Spider):
+    name = "anime"
+    allowed_domains = ["myanimelist.net"]
+    start_urls = ["https://myanimelist.net/topanime.php"]
+
+    def parse(self, response):
+        # Select all ranking-list rows
+        animes = response.css('tr.ranking-list')
+        for movie in animes:
+            # Extract the information from the `.information` section
+            info_text = movie.css('.information.di-ib.mt4::text').getall()
+            episodes = info_text[0].strip() if len(info_text) > 0 else None  # First line: episodes
+            airing_dates = info_text[1].strip() if len(info_text) > 1 else None  # Second line: airing dates
+            members = info_text[2].strip() if len(info_text) > 2 else None  # Third line: members
+
+            yield {
+                'title': movie.css('h3.fl-l.fs14.fw-b.anime_ranking_h3 a::text').get(),
+                'image': movie.css('a.hoverinfo_trigger.fl-l.ml12.mr8 img::attr(data-src)').get(),
+                'episodes': episodes,
+                'airing_dates': airing_dates,
+                'members': members,
+                'score': movie.css('span.score-label::text').get(),
+                'url': movie.css('h3.fl-l.fs14.fw-b.anime_ranking_h3 a::attr(href)').get(),
+            }
+
+        # Generate the next page URL up to limit 1000
+        current_limit = int(response.url.split('=')[-1]) if '=' in response.url else 0
+        next_limit = current_limit + 50
+
+        if next_limit <= 4400:
+            next_page_url = f"https://myanimelist.net/topanime.php?limit={next_limit}"
+            yield scrapy.Request(url=next_page_url, callback=self.parse)
