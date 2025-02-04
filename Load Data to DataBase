@@ -1,0 +1,400 @@
+#load the json file to database
+#this step took me 3 days, some errors in the json file and also the struture of the data is nested too deep so it is very difficult to handle this step 
+-------------------------------------------------------------------------------------------------------
+import json
+import pandas as pd
+import sqlite3
+from typing import List, Dict
+import numpy as np
+
+class AnimeDatabase:
+    def __init__(self, db_name: str = 'animelist.db'):
+        self.conn = sqlite3.connect(db_name)
+        self.cursor = self.conn.cursor()
+        self.create_tables()
+
+    def create_tables(self):
+        # Create Anime table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS anime (
+            anime_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            japanese_title TEXT,
+            english_title TEXT,
+            type TEXT,
+            episodes TEXT,
+            status TEXT,
+            aired TEXT,
+            premiered TEXT,
+            broadcast TEXT,
+            source TEXT,
+            duration TEXT,
+            rating TEXT,
+            score REAL,
+            ranked TEXT,
+            popularity TEXT,
+            members TEXT,
+            favorites TEXT,
+            image_url TEXT
+        )
+        ''')
+
+        # Create Characters table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS characters (
+            character_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            anime_id INTEGER,
+            name TEXT,
+            character_type TEXT,
+            image_url TEXT,
+            FOREIGN KEY (anime_id) REFERENCES anime(anime_id)
+        )
+        ''')
+
+        # Create Voice Actors table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS voice_actors (
+            voice_actor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            image_url TEXT,
+            language TEXT
+        )
+        ''')
+
+        # Create Anime_Character_Voice table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS anime_character_voice (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            anime_id INTEGER,
+            character_id INTEGER,
+            voice_actor_id INTEGER,
+            FOREIGN KEY (anime_id) REFERENCES anime(anime_id),
+            FOREIGN KEY (character_id) REFERENCES characters(character_id),
+            FOREIGN KEY (voice_actor_id) REFERENCES voice_actors(voice_actor_id)
+        )
+        ''')
+
+        # Create Reviews table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reviews (
+            review_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            anime_id INTEGER,
+            status TEXT,
+            number_of_reviews INTEGER,
+            FOREIGN KEY (anime_id) REFERENCES anime(anime_id)
+        )
+        ''')
+
+        # Create Descriptions table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS descriptions (
+            description_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            anime_id INTEGER,
+            description_text TEXT,
+            FOREIGN KEY (anime_id) REFERENCES anime(anime_id)
+        )
+        ''')
+
+        # Create Genres table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS genres (
+            genre_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            genre_name TEXT UNIQUE
+        )
+        ''')
+
+        # Create Anime_Genres table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS anime_genres (
+            anime_id INTEGER,
+            genre_id INTEGER,
+            FOREIGN KEY (anime_id) REFERENCES anime(anime_id),
+            FOREIGN KEY (genre_id) REFERENCES genres(genre_id),
+            PRIMARY KEY (anime_id, genre_id)
+        )
+        ''')
+
+        self.conn.commit()
+
+    def insert_anime_data(self, data: List[Dict]):
+        successful_inserts = 0
+        failed_inserts = 0
+        duplicates = 0
+        
+        # Keep track of titles we've seen to avoid duplicates
+        seen_titles = set()
+        
+        for idx, item in enumerate(data):
+            try:
+                # Validate that item is a dictionary
+                if not isinstance(item, dict):
+                    print(f"Skipping invalid item at index {idx}: not a dictionary")
+                    failed_inserts += 1
+                    continue
+
+                # Get title and check for duplicate
+                title = item.get('title')
+                if not title:  # Skip items with no title
+                    print(f"Skipping item {idx}: No title found")
+                    failed_inserts += 1
+                    continue
+                
+                if title in seen_titles:
+                    print(f"Skipping duplicate title: {title}")
+                    duplicates += 1
+                    continue
+                
+                seen_titles.add(title)
+
+                print(f"Processing item {idx + 1}/{len(data)}: {title}")
+                
+                # Insert anime with safer data access
+                self.cursor.execute('''
+                INSERT INTO anime (title, japanese_title, english_title, type, episodes,
+                                 status, aired, premiered, broadcast, source, duration,
+                                 rating, score, ranked, popularity, members, favorites,
+                                 image_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    title,  # Use the title we already validated
+                    item.get('japanese_title', [None])[0] if item.get('japanese_title') else None,
+                    item.get('english_title', [None])[0] if item.get('english_title') else None,
+                    item.get('anime_type', item.get('type', None)),
+                    item.get('episodes', [None])[0] if item.get('episodes') else None,
+                    item.get('status', [None])[0] if item.get('status') else None,
+                    item.get('aired', [None])[0] if item.get('aired') else None,
+                    item.get('premiered', None),
+                    item.get('broadcast', [None])[0] if item.get('broadcast') else None,
+                    item.get('source', [None])[0] if item.get('source') else None,
+                    item.get('duration', [None])[0] if item.get('duration') else None,
+                    item.get('rating', [None])[0] if item.get('rating') else None,
+                    float(item.get('score_detail', item.get('score', 0))),
+                    item.get('ranked', [None])[0] if item.get('ranked') else None,
+                    item.get('popularity', [None])[0] if item.get('popularity') else None,
+                    item.get('members', [None])[0] if item.get('members') else None,
+                    item.get('favorites', [None])[0] if item.get('favorites') else None,
+                    item.get('image_url', None)
+                ))
+                
+                anime_id = self.cursor.lastrowid
+
+                # Insert descriptions
+                descriptions = item.get('description', [])
+                if isinstance(descriptions, str):
+                    descriptions = [descriptions]
+                for desc in descriptions:
+                    self.cursor.execute('''
+                    INSERT INTO descriptions (anime_id, description_text)
+                    VALUES (?, ?)
+                    ''', (anime_id, desc))
+
+                # Insert characters and voice actors
+                char_names = item.get('character_names', [])
+                char_types = item.get('character_types', [])
+                va_names = item.get('voice_actor_names', [])
+                languages = item.get('languages', [])
+                char_images = item.get('character_images', [])
+                va_images = item.get('voice_actor_images', [])
+
+                # Make sure all lists have the same length by padding with None
+                max_len = max(len(char_names), len(char_types), len(va_names), 
+                             len(languages), len(char_images), len(va_images))
+                char_names = char_names + [None] * (max_len - len(char_names))
+                char_types = char_types + [None] * (max_len - len(char_types))
+                va_names = va_names + [None] * (max_len - len(va_names))
+                languages = languages + [None] * (max_len - len(languages))
+                char_images = char_images + [None] * (max_len - len(char_images))
+                va_images = va_images + [None] * (max_len - len(va_images))
+
+                for char_name, char_type, va_name, language, char_img, va_img in zip(
+                    char_names, char_types, va_names, languages, char_images, va_images
+                ):
+                    if char_name or va_name:  # Only insert if we have at least a character or voice actor
+                        # Insert character
+                        if char_name:
+                            self.cursor.execute('''
+                            INSERT INTO characters (anime_id, name, character_type, image_url)
+                            VALUES (?, ?, ?, ?)
+                            ''', (anime_id, char_name, char_type, char_img))
+                            character_id = self.cursor.lastrowid
+                        else:
+                            character_id = None
+
+                        # Insert voice actor
+                        if va_name:
+                            self.cursor.execute('''
+                            INSERT INTO voice_actors (name, image_url, language)
+                            VALUES (?, ?, ?)
+                            ''', (va_name, va_img, language))
+                            voice_actor_id = self.cursor.lastrowid
+                        else:
+                            voice_actor_id = None
+
+                        # Insert relationship only if we have both IDs
+                        if character_id and voice_actor_id:
+                            self.cursor.execute('''
+                            INSERT INTO anime_character_voice (anime_id, character_id, voice_actor_id)
+                            VALUES (?, ?, ?)
+                            ''', (anime_id, character_id, voice_actor_id))
+
+                # Insert genres
+                genres = item.get('genres', [])
+                if isinstance(genres, str):
+                    genres = [genres]
+                for genre in genres:
+                    if genre:
+                        # Insert genre if not exists
+                        self.cursor.execute('''
+                        INSERT OR IGNORE INTO genres (genre_name)
+                        VALUES (?)
+                        ''', (genre,))
+                        
+                        # Get genre_id
+                        self.cursor.execute('SELECT genre_id FROM genres WHERE genre_name = ?', (genre,))
+                        genre_id = self.cursor.fetchone()[0]
+
+                        # Insert anime-genre relationship
+                        self.cursor.execute('''
+                        INSERT INTO anime_genres (anime_id, genre_id)
+                        VALUES (?, ?)
+                        ''', (anime_id, genre_id))
+
+                # Insert reviews
+                statuses = item.get('statuses', [])
+                numbers = item.get('numbers', [])
+                for status, number in zip(statuses, numbers):
+                    if status and number:
+                        try:
+                            number_int = int(number)
+                            self.cursor.execute('''
+                            INSERT INTO reviews (anime_id, status, number_of_reviews)
+                            VALUES (?, ?, ?)
+                            ''', (anime_id, status, number_int))
+                        except (ValueError, TypeError):
+                            print(f"Warning: Invalid review number format: {number}")
+
+                successful_inserts += 1
+
+            except Exception as e:
+                failed_inserts += 1
+                print(f"Error processing item {idx}: {str(e)}")
+                print(f"Problematic item title: {item.get('title', 'Unknown')}")
+                continue
+
+        print(f"\nInsertion Summary:")
+        print(f"Successful inserts: {successful_inserts}")
+        print(f"Failed inserts: {failed_inserts}")
+        print(f"Duplicates skipped: {duplicates}")
+        print(f"Total items processed: {successful_inserts + failed_inserts + duplicates}")
+        
+        self.conn.commit()
+
+    def clear_tables(self):
+        """Clear all data from tables"""
+        tables = ['anime_character_voice', 'voice_actors', 'characters', 
+                  'anime_genres', 'genres', 'reviews', 'descriptions', 'anime']
+        for table in tables:
+            self.cursor.execute(f'DELETE FROM {table}')
+        self.conn.commit()
+
+def main():
+    try:
+        # Read JSON file
+        with open('fixed_fullanimdata.json', 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+        
+        # Handle nested array structure - the data is nested two levels deep
+        if isinstance(raw_data, list):
+            if len(raw_data) > 0 and isinstance(raw_data[0], list):
+                data = []
+                for sublist in raw_data:
+                    if isinstance(sublist, list):
+                        data.extend(sublist)  # Flatten one level of nesting
+                    else:
+                        data.append(sublist)
+            else:
+                data = raw_data
+            
+        print(f"Successfully loaded JSON file. Found {len(data)} items.")
+        
+        # Debug: Print first few titles to verify data structure
+        print("\nFirst 5 titles:")
+        for i, item in enumerate(data[:5]):
+            print(f"{i+1}. {item.get('title', 'No title')}")
+        
+        # Validate data structure
+        print("\nValidating data structure...")
+        required_fields = [
+            ('title', None),
+            ('type', 'anime_type'),
+            ('score', 'score_detail'),
+            ('genres', None),
+            ('description', None),
+            ('character_names', None)
+        ]
+        
+        missing_fields = []
+        for idx, item in enumerate(data):
+            if not isinstance(item, dict):
+                print(f"Warning: Item at index {idx} is not a dictionary")
+                continue
+                
+            for primary, alternate in required_fields:
+                if primary not in item and (alternate is None or alternate not in item):
+                    missing_fields.append(f"Item {idx}: missing {primary}/{alternate}")
+        
+        if missing_fields:
+            print("\nMissing required fields:")
+            for msg in missing_fields[:10]:
+                print(msg)
+            if len(missing_fields) > 10:
+                print(f"... and {len(missing_fields) - 10} more issues")
+        else:
+            print("All items have required fields")
+        
+        # Initialize database
+        db = AnimeDatabase()
+        print("Clearing existing data...")
+        db.clear_tables()
+        print("Inserting new data...")
+        
+        # Insert data
+        db.insert_anime_data(data)
+        
+        # Verify data insertion
+        cursor = db.cursor
+        
+        # Check counts in main tables
+        cursor.execute("SELECT COUNT(*) FROM anime")
+        anime_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM genres")
+        genre_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM characters")
+        character_count = cursor.fetchone()[0]
+        
+        print("\nData insertion results:")
+        print(f"Anime entries: {anime_count}")
+        print(f"Genre entries: {genre_count}")
+        print(f"Character entries: {character_count}")
+        
+        if anime_count > 0:
+            print("\nSample anime titles:")
+            cursor.execute("SELECT title FROM anime LIMIT 5")
+            for row in cursor.fetchall():
+                print(f"- {row[0]}")
+        
+        print("\nData has been successfully imported into the database!")
+        
+    except FileNotFoundError:
+        print("Error: Could not find 'fixed_fullanimdata.json'. Please make sure the file exists in the correct location.")
+    except json.JSONDecodeError:
+        print("Error: The JSON file is not properly formatted.")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    main()
