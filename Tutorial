@@ -1,0 +1,27 @@
+How to scrape a website fast and free
+-------------------------------------------
+1. create a folder
+2. cd to that folder
+3. create a virtual environment by type: python -m venv venv
+4. active virtual environment: venv\scripts\activate
+5. pip install certifi == 2025.1.31
+6. pip install cffi == 1.17.1
+7. pip install curl_cffi == 0.7.4
+8. pip install markdown-it-py == 3.0.0
+9. pip install mdurl == 0.1.2
+10. pip install pycparser == 2.22
+11. pip install pygments == 2.19.1
+12. pip install rich == 13.9.4
+13. pip install typing_extensions == 4.12.2
+14. create a python file: code main.py
+15. go to https://curlconverter.com/
+16. paste cURL (bash)
+17. copy and paste into main.py
+18. on the top, CHANGE 
+import requests -> 
+from curl_cffi import requests
+from rich import print
+from bs4 import BeautifulSoup
+import pandas as pd
+19. on the bottom, add: print(response.json())
+20. run python file in CMD: python main.py
